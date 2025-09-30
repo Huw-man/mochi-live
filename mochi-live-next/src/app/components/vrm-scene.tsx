@@ -19,6 +19,8 @@ export function VRMScene({ conversation }: VRMSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const vrmRef = useRef<VRM | null>(null);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
+  const idleActionRef = useRef<THREE.AnimationAction | null>(null);
+  const greetingActionRef = useRef<THREE.AnimationAction | null>(null);
   const clockRef = useRef<THREE.Clock>(new THREE.Clock());
   const visemeSmootherRef = useRef<VisemeSmoother>(new VisemeSmoother());
   const [volume, setVolume] = useState(0);
@@ -111,8 +113,8 @@ export function VRMScene({ conversation }: VRMSceneProps) {
         scene.add(vrm.scene);
         console.log('VRM model loaded successfully');
 
-        // Load idle animation
-        loadIdleAnimation(vrm);
+        // Load both animations
+        loadAnimations(vrm);
       },
       (progress) => {
         console.log('Loading model...', 100 * (progress.loaded / progress.total), '%');
@@ -122,28 +124,67 @@ export function VRMScene({ conversation }: VRMSceneProps) {
       }
     );
 
-    // Load and apply Mixamo FBX animation with proper retargeting
-    const loadIdleAnimation = async (vrm: VRM) => {
+    // Weighted random selection: 75% idle, 25% greeting
+    const selectNextAnimation = (): 'idle' | 'greeting' => {
+      return Math.random() < 0.25 ? 'greeting' : 'idle';
+    };
+
+    // Play selected animation with crossfade
+    const playAnimation = (type: 'idle' | 'greeting', crossfadeDuration: number = 0.5) => {
+      const newAction = type === 'idle' ? idleActionRef.current : greetingActionRef.current;
+      const oldAction = type === 'idle' ? greetingActionRef.current : idleActionRef.current;
+
+      if (!newAction) return;
+
+      // Stop old animation with fade out
+      if (oldAction && oldAction.isRunning()) {
+        oldAction.fadeOut(crossfadeDuration);
+      }
+
+      // Play new animation with fade in
+      newAction.reset();
+      newAction.fadeIn(crossfadeDuration);
+      newAction.play();
+
+      console.log(`🎬 Playing ${type} animation`);
+    };
+
+    // Load and apply Mixamo FBX animations with proper retargeting
+    const loadAnimations = async (vrm: VRM) => {
       try {
-        console.log('Loading Mixamo animation...');
-
-        // Load and convert the Mixamo animation for VRM
-        const clip = await loadMixamoAnimation('/vrm/Idle.fbx', vrm);
-
-        console.log('Animation loaded and converted successfully');
+        console.log('Loading animations...');
 
         // Create animation mixer for the VRM
         const mixer = new THREE.AnimationMixer(vrm.scene);
         mixerRef.current = mixer;
 
-        // Create and play the animation in loop
-        const action = mixer.clipAction(clip);
-        action.setLoop(THREE.LoopRepeat, Infinity);
-        action.play();
+        // Load idle animation
+        console.log('Loading idle animation...');
+        const idleClip = await loadMixamoAnimation('/vrm/Idle.fbx', vrm);
+        const idleAction = mixer.clipAction(idleClip);
+        idleAction.setLoop(THREE.LoopOnce, 1);
+        idleActionRef.current = idleAction;
 
-        console.log('Idle animation playing in loop');
+        // Load greeting animation
+        console.log('Loading greeting animation...');
+        const greetingClip = await loadMixamoAnimation('/vrm/Standing Greeting.fbx', vrm);
+        const greetingAction = mixer.clipAction(greetingClip);
+        greetingAction.setLoop(THREE.LoopOnce, 1);
+        greetingActionRef.current = greetingAction;
+
+        console.log('Both animations loaded successfully');
+
+        // Set up animation finished listener
+        mixer.addEventListener('finished', () => {
+          const nextAnimation = selectNextAnimation();
+          playAnimation(nextAnimation, 0.3);
+        });
+
+        // Start with idle animation
+        playAnimation('idle', 0);
+
       } catch (error) {
-        console.error('Error loading animation:', error);
+        console.error('Error loading animations:', error);
       }
     };
 
