@@ -1,27 +1,15 @@
 'use client';
 
 import { useConversation } from '@elevenlabs/react';
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { VRMScene } from './vrm-scene';
-import { textToVisemeFrames, VisemeFrame } from '../utils/syllableToViseme';
 
 export function AvatarConversation() {
-  const [visemeFrames, setVisemeFrames] = useState<VisemeFrame[]>([]);
-  const [visemeStartTime, setVisemeStartTime] = useState<number>(0);
-
   const conversation = useConversation({
     onConnect: () => console.log('✅ ElevenLabs Connected'),
     onDisconnect: () => console.log('❌ ElevenLabs Disconnected'),
     onMessage: (message) => {
       console.log('💬 Message:', message);
-
-      // Parse message and generate viseme frames
-      if (message.message && typeof message.message === 'string') {
-        const frames = textToVisemeFrames(message.message, 2.5); // 2.5 syllables/second
-        setVisemeFrames(frames);
-        setVisemeStartTime(Date.now());
-        console.log('🎭 Generated', frames.length, 'viseme frames for:', message.message);
-      }
     },
     onError: (error) => console.error('🚨 Error:', error),
   });
@@ -63,11 +51,7 @@ export function AvatarConversation() {
   return (
     <>
       {/* VRM Avatar Scene */}
-      <VRMScene
-        conversation={conversation}
-        visemeFrames={visemeFrames}
-        visemeStartTime={visemeStartTime}
-      />
+      <VRMScene conversation={conversation} />
 
       {/* Conversation Controls */}
       <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-20">

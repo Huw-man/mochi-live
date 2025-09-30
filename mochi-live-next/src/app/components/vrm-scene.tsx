@@ -6,40 +6,22 @@ import { VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { loadMixamoAnimation } from '../utils/loadMixamoAnimation';
-import { VisemeFrame, getCurrentViseme } from '../utils/syllableToViseme';
+import { frequencyToViseme, VisemeSmoother } from '../utils/frequencyToViseme';
 
 interface VRMSceneProps {
   conversation?: {
     isSpeaking: boolean;
     getOutputByteFrequencyData: () => Uint8Array | undefined;
   };
-  visemeFrames?: VisemeFrame[];
-  visemeStartTime?: number;
 }
 
-export function VRMScene({ conversation, visemeFrames, visemeStartTime }: VRMSceneProps) {
+export function VRMScene({ conversation }: VRMSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const vrmRef = useRef<VRM | null>(null);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const clockRef = useRef<THREE.Clock>(new THREE.Clock());
-  const visemeFramesRef = useRef<VisemeFrame[]>([]);
-  const visemeStartTimeRef = useRef<number>(0);
+  const visemeSmootherRef = useRef<VisemeSmoother>(new VisemeSmoother());
   const [volume, setVolume] = useState(0);
-
-  // Update refs when props change
-  useEffect(() => {
-    if (visemeFrames) {
-      visemeFramesRef.current = visemeFrames;
-      console.log('📝 Updated viseme frames:', visemeFrames.length);
-    }
-  }, [visemeFrames]);
-
-  useEffect(() => {
-    if (visemeStartTime) {
-      visemeStartTimeRef.current = visemeStartTime;
-      console.log('⏰ Updated viseme start time:', new Date(visemeStartTime).toISOString());
-    }
-  }, [visemeStartTime]);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -165,35 +147,6 @@ export function VRMScene({ conversation, visemeFrames, visemeStartTime }: VRMSce
       }
     };
 
-    // Calculate audio volume from ElevenLabs output
-    const getAudioVolume = (): number => {
-      if (!conversation?.getOutputByteFrequencyData) {
-        console.log('⚠️ No getOutputByteFrequencyData available');
-        return 0;
-      }
-
-      try {
-        const dataArray = conversation.getOutputByteFrequencyData();
-        if (!dataArray) {
-          console.log('⚠️ No audio data array');
-          return 0;
-        }
-
-        // Calculate average volume
-        const sum = dataArray.reduce((a, b) => a + b, 0);
-        const average = sum / dataArray.length;
-
-        if (average > 0) {
-          console.log('🔊 Audio volume:', average.toFixed(2));
-        }
-
-        return average;
-      } catch (error) {
-        console.error('❌ Error getting audio volume:', error);
-        return 0;
-      }
-    };
-
     // Animation loop
     const animate = () => {
       requestAnimationFrame(animate);
@@ -206,44 +159,31 @@ export function VRMScene({ conversation, visemeFrames, visemeStartTime }: VRMSce
       }
 
       // Update VRM if loaded
-      if (vrmRef.current) {
-        const currentVolume = getAudioVolume();
-        setVolume(currentVolume);
+      if (vrmRef.current && vrmRef.current.expressionManager) {
+        // Get audio frequency data from ElevenLabs
+        const frequencyData = conversation?.getOutputByteFrequencyData();
 
-        // Syllable-based viseme animation
-        if (visemeFramesRef.current.length > 0 && visemeStartTimeRef.current > 0 && vrmRef.current.expressionManager) {
-          let elapsedMs = Date.now() - visemeStartTimeRef.current;
-          if (elapsedMs < 0) elapsedMs = 0; // Not started yet, use first frame
+        // Analyze frequency data to get viseme
+        const rawViseme = frequencyToViseme(frequencyData);
 
-          const currentViseme = getCurrentViseme(visemeFramesRef.current, elapsedMs);
+        // Smooth the viseme transitions
+        const smoothedViseme = visemeSmootherRef.current.add(rawViseme.viseme, rawViseme.intensity);
 
-          if (currentViseme) {
-            // Reset all visemes first
-            const allVisemes = ['aa', 'ee', 'ih', 'oh', 'ou'];
-            allVisemes.forEach(v => {
-              vrmRef.current?.expressionManager?.setValue(v, 0);
-            });
+        // Update volume display
+        setVolume(rawViseme.intensity * 100);
 
-            // Apply current viseme
-            if (currentViseme.viseme !== 'neutral') {
-              vrmRef.current.expressionManager.setValue(
-                currentViseme.viseme,
-                currentViseme.intensity
-              );
-            }
-          } else {
-            // All frames played, reset to neutral
-            const allVisemes = ['aa', 'ee', 'ih', 'oh', 'ou'];
-            allVisemes.forEach(v => {
-              vrmRef.current?.expressionManager?.setValue(v, 0);
-            });
-          }
-        } else if (vrmRef.current.expressionManager) {
-          // No viseme frames, reset to neutral
-          const allVisemes = ['aa', 'ee', 'ih', 'oh', 'ou'];
-          allVisemes.forEach(v => {
-            vrmRef.current?.expressionManager?.setValue(v, 0);
-          });
+        // Reset all visemes first
+        const allVisemes = ['aa', 'ee', 'ih', 'oh', 'ou'];
+        allVisemes.forEach(v => {
+          vrmRef.current?.expressionManager?.setValue(v, 0);
+        });
+
+        // Apply current viseme
+        if (smoothedViseme.viseme !== 'neutral' && smoothedViseme.intensity > 0.1) {
+          vrmRef.current.expressionManager.setValue(
+            smoothedViseme.viseme,
+            smoothedViseme.intensity
+          );
         }
 
         vrmRef.current.update(deltaTime);
