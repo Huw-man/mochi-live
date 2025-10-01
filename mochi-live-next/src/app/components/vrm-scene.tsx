@@ -81,7 +81,7 @@ export function VRMScene({ conversation }: VRMSceneProps) {
     loader.register((parser) => new VRMLoaderPlugin(parser));
 
     loader.load(
-      '/vrm/8622788685404555712.vrm',
+      '/vrm/mochi-2.vrm',
       (gltf) => {
         const vrm = gltf.userData.vrm as VRM;
         vrmRef.current = vrm;
