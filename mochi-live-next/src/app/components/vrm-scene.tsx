@@ -26,10 +26,12 @@ export function VRMScene({ conversation, animationTrigger }: VRMSceneProps) {
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const idleActionRef = useRef<THREE.AnimationAction | null>(null);
   const greetingActionRef = useRef<THREE.AnimationAction | null>(null);
+  const waveHipHopActionRef = useRef<THREE.AnimationAction | null>(null);
+  const northernSoulSpinActionRef = useRef<THREE.AnimationAction | null>(null);
   const clockRef = useRef<THREE.Clock>(new THREE.Clock());
   const visemeSmootherRef = useRef<VisemeSmoother>(new VisemeSmoother());
   const blinkControllerRef = useRef<BlinkController>(new BlinkController());
-  const playAnimationRef = useRef<((type: 'idle' | 'greeting', crossfadeDuration?: number) => void) | null>(null);
+  const playAnimationRef = useRef<((type: 'idle' | 'greeting' | 'waveHipHop' | 'northernSoulSpin', crossfadeDuration?: number) => void) | null>(null);
   const [volume, setVolume] = useState(0);
 
   useEffect(() => {
@@ -117,10 +119,13 @@ export function VRMScene({ conversation, animationTrigger }: VRMSceneProps) {
           rightLowerArm.rotation.z = 0; // Keep lower arm straight
         }
 
+        // Hide model initially to prevent T-pose flash
+        vrm.scene.visible = false;
+
         scene.add(vrm.scene);
         console.log('VRM model loaded successfully');
 
-        // Load both animations
+        // Load animations and show model when idle starts
         loadAnimations(vrm);
       },
       (progress) => {
@@ -132,32 +137,87 @@ export function VRMScene({ conversation, animationTrigger }: VRMSceneProps) {
     );
 
     // Always return to idle after any animation finishes
-    const selectNextAnimation = (): 'idle' | 'greeting' => {
+    const selectNextAnimation = (): 'idle' | 'greeting' | 'waveHipHop' | 'northernSoulSpin' => {
       return 'idle';
     };
 
     // Play selected animation with crossfade
-    const playAnimation = (type: 'idle' | 'greeting', crossfadeDuration: number = 0.5) => {
-      const newAction = type === 'idle' ? idleActionRef.current : greetingActionRef.current;
-      const oldAction = type === 'idle' ? greetingActionRef.current : idleActionRef.current;
+    const playAnimation = (type: 'idle' | 'greeting' | 'waveHipHop' | 'northernSoulSpin', crossfadeDuration: number = 0.5) => {
+      // Map animation type to action ref
+      const animationActions: Record<string, THREE.AnimationAction | null> = {
+        idle: idleActionRef.current,
+        greeting: greetingActionRef.current,
+        waveHipHop: waveHipHopActionRef.current,
+        northernSoulSpin: northernSoulSpinActionRef.current,
+      };
+
+      const newAction = animationActions[type];
 
       if (!newAction) return;
 
-      // Stop old animation with fade out
-      if (oldAction && oldAction.isRunning()) {
-        oldAction.fadeOut(crossfadeDuration);
-      }
+      console.log(`🎬 === Starting transition to: ${type} ===`);
 
-      // Only reset greeting animation (one-shot), not idle (continuous loop)
-      if (type === 'greeting') {
+      // Log current state before transition
+      Object.entries(animationActions).forEach(([key, action]) => {
+        if (action) {
+          console.log(`  ${key}: running=${action.isRunning()}, weight=${action.getEffectiveWeight().toFixed(3)}, time=${action.time.toFixed(3)}/${action.getClip().duration.toFixed(3)}`);
+        }
+      });
+
+      // Special handling when transitioning TO idle
+      if (type === 'idle') {
+        // Fade out and stop all one-shot animations (including paused ones)
+        Object.entries(animationActions).forEach(([key, action]) => {
+          if (action && key !== 'idle') {
+            const isActive = action.isRunning() || action.paused;
+            if (isActive) {
+              console.log(`  🛑 Fading out and stopping: ${key} (paused: ${action.paused})`);
+              action.fadeOut(crossfadeDuration);
+
+              // CRITICAL FIX: Delay stop/reset until AFTER fadeOut completes
+              // This ensures the animation maintains weight during the entire crossfade
+              setTimeout(() => {
+                action.enabled = false; // Break bone influence
+                action.paused = false;
+                action.stop();
+                action.reset();
+                console.log(`  ✅ Cleanup complete for: ${key}`);
+              }, crossfadeDuration * 1000);
+            }
+          }
+        });
+
+        // Idle should always be playing in background, just fade it back in
+        if (!newAction.isRunning()) {
+          console.log(`  ▶️ Restarting idle (was stopped)`);
+          newAction.play();
+        } else {
+          console.log(`  ⬆️ Fading in idle (was running at time: ${newAction.time.toFixed(3)})`);
+        }
+      } else {
+        // When transitioning FROM idle to one-shot animation
+        // Fade out idle (but keep it running in background)
+        if (idleActionRef.current && idleActionRef.current.isRunning()) {
+          console.log(`  ⬇️ Fading out: idle (weight: ${idleActionRef.current.getEffectiveWeight().toFixed(3)} → 0)`);
+          idleActionRef.current.fadeOut(crossfadeDuration);
+        }
+
+        // Reset one-shot animations to start from beginning
+        console.log(`  🔄 Resetting ${type} to frame 0`);
         newAction.reset();
       }
 
-      // Play new animation with fade in
+      // Enable and play new animation with fade in
+      newAction.enabled = true;
+      newAction.setEffectiveTimeScale(1);
+      newAction.setEffectiveWeight(1);
+      console.log(`  ⬆️ Fading in: ${type} (weight: ${newAction.getEffectiveWeight().toFixed(3)} → 1)`);
       newAction.fadeIn(crossfadeDuration);
-      newAction.play();
+      if (type !== 'idle') {
+        newAction.play();
+      }
 
-      console.log(`🎬 Playing ${type} animation`);
+      console.log(`🎬 === Transition to ${type} started ===\n`);
     };
 
     // Store playAnimation function in ref for external access
@@ -178,25 +238,53 @@ export function VRMScene({ conversation, animationTrigger }: VRMSceneProps) {
         const idleAction = mixer.clipAction(idleClip);
         idleAction.setLoop(THREE.LoopRepeat, Infinity); // Loop idle continuously
         idleActionRef.current = idleAction;
+        console.log(`  ✅ Idle loaded: duration=${idleClip.duration.toFixed(3)}s, tracks=${idleClip.tracks.length}`);
 
         // Load greeting animation
         console.log('Loading greeting animation...');
         const greetingClip = await loadMixamoAnimation('/animations/Standing Greeting.fbx', vrm);
         const greetingAction = mixer.clipAction(greetingClip);
         greetingAction.setLoop(THREE.LoopOnce, 1);
-        greetingAction.clampWhenFinished = true; // Hold last frame instead of returning to T-pose
+        greetingAction.clampWhenFinished = true; // Hold last frame to avoid T-pose
         greetingActionRef.current = greetingAction;
+        console.log(`  ✅ Greeting loaded: duration=${greetingClip.duration.toFixed(3)}s, tracks=${greetingClip.tracks.length}`);
 
-        console.log('Both animations loaded successfully');
+        // Load wave hip hop dance animation
+        console.log('Loading wave hip hop dance animation...');
+        const waveHipHopClip = await loadMixamoAnimation('/animations/Wave Hip Hop Dance.fbx', vrm);
+        const waveHipHopAction = mixer.clipAction(waveHipHopClip);
+        waveHipHopAction.setLoop(THREE.LoopOnce, 1);
+        waveHipHopAction.clampWhenFinished = true; // Hold last frame to avoid T-pose
+        waveHipHopAction.timeScale = 0.7; // Slow down to 70% speed
+        waveHipHopActionRef.current = waveHipHopAction;
+        console.log(`  ✅ Wave Hip Hop loaded: duration=${waveHipHopClip.duration.toFixed(3)}s (slowed to ${(waveHipHopClip.duration / 0.7).toFixed(3)}s), tracks=${waveHipHopClip.tracks.length}`);
+
+        // Load northern soul spin animation
+        console.log('Loading northern soul spin animation...');
+        const northernSoulSpinClip = await loadMixamoAnimation('/animations/Northern Soul Spin.fbx', vrm);
+        const northernSoulSpinAction = mixer.clipAction(northernSoulSpinClip);
+        northernSoulSpinAction.setLoop(THREE.LoopOnce, 1);
+        northernSoulSpinAction.clampWhenFinished = true; // Hold last frame to avoid T-pose
+        northernSoulSpinAction.timeScale = 0.7; // Slow down to 70% speed
+        northernSoulSpinActionRef.current = northernSoulSpinAction;
+        console.log(`  ✅ Northern Soul Spin loaded: duration=${northernSoulSpinClip.duration.toFixed(3)}s (slowed to ${(northernSoulSpinClip.duration / 0.7).toFixed(3)}s), tracks=${northernSoulSpinClip.tracks.length}`);
+
+        console.log('All animations loaded successfully');
 
         // Set up animation finished listener
         mixer.addEventListener('finished', () => {
           const nextAnimation = selectNextAnimation();
-          playAnimation(nextAnimation, 0.3);
+          playAnimation(nextAnimation, 0.5); // Longer fade for smoother transition
         });
 
-        // Start with idle animation
+        // Start with idle animation and show model
         playAnimation('idle', 0);
+
+        // Show model now that idle animation is playing
+        if (vrmRef.current) {
+          vrmRef.current.scene.visible = true;
+          console.log('✨ Model visible with idle animation');
+        }
 
       } catch (error) {
         console.error('Error loading animations:', error);
@@ -289,10 +377,13 @@ export function VRMScene({ conversation, animationTrigger }: VRMSceneProps) {
     console.log('🎮 Animation trigger received:', animationTrigger);
 
     // Map animation names to animation types
-    const animationMap: Record<string, 'idle' | 'greeting'> = {
-      'wave': 'greeting',
+    const animationMap: Record<string, 'idle' | 'greeting' | 'waveHipHop' | 'northernSoulSpin'> = {
       'greeting': 'greeting',
       'idle': 'idle',
+      'hiphopdance': 'waveHipHop',
+      'wavehiphopdance': 'waveHipHop',
+      'northernsoulspin': 'northernSoulSpin',
+      'spin': 'northernSoulSpin',
     };
 
     const animationType = animationMap[animationTrigger.animation.toLowerCase()];

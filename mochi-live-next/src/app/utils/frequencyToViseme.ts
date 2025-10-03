@@ -133,10 +133,6 @@ export function frequencyToViseme(frequencyData: Uint8Array | undefined): { vise
   // Normalize intensity based on score (0-1 range)
   const intensity = Math.min(1.0, maxScore / 150);
 
-  // Debug logging
-  console.log('🎵 Formant Scores:', debugScores);
-  console.log(`✅ Detected: ${detectedViseme} (score: ${maxScore.toFixed(1)}, intensity: ${intensity.toFixed(2)})`);
-
   return { viseme: detectedViseme, intensity };
 }
 
