@@ -7,6 +7,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { loadMixamoAnimation } from '../utils/loadMixamoAnimation';
 import { frequencyToViseme, VisemeSmoother } from '../utils/frequencyToViseme';
+import { BlinkController } from '../utils/blinkController';
 
 interface VRMSceneProps {
   conversation?: {
@@ -27,6 +28,7 @@ export function VRMScene({ conversation, animationTrigger }: VRMSceneProps) {
   const greetingActionRef = useRef<THREE.AnimationAction | null>(null);
   const clockRef = useRef<THREE.Clock>(new THREE.Clock());
   const visemeSmootherRef = useRef<VisemeSmoother>(new VisemeSmoother());
+  const blinkControllerRef = useRef<BlinkController>(new BlinkController());
   const playAnimationRef = useRef<((type: 'idle' | 'greeting', crossfadeDuration?: number) => void) | null>(null);
   const [volume, setVolume] = useState(0);
 
@@ -146,8 +148,12 @@ export function VRMScene({ conversation, animationTrigger }: VRMSceneProps) {
         oldAction.fadeOut(crossfadeDuration);
       }
 
+      // Only reset greeting animation (one-shot), not idle (continuous loop)
+      if (type === 'greeting') {
+        newAction.reset();
+      }
+
       // Play new animation with fade in
-      newAction.reset();
       newAction.fadeIn(crossfadeDuration);
       newAction.play();
 
@@ -170,7 +176,7 @@ export function VRMScene({ conversation, animationTrigger }: VRMSceneProps) {
         console.log('Loading idle animation...');
         const idleClip = await loadMixamoAnimation('/animations/Idle.fbx', vrm);
         const idleAction = mixer.clipAction(idleClip);
-        idleAction.setLoop(THREE.LoopOnce, 1);
+        idleAction.setLoop(THREE.LoopRepeat, Infinity); // Loop idle continuously
         idleActionRef.current = idleAction;
 
         // Load greeting animation
@@ -178,6 +184,7 @@ export function VRMScene({ conversation, animationTrigger }: VRMSceneProps) {
         const greetingClip = await loadMixamoAnimation('/animations/Standing Greeting.fbx', vrm);
         const greetingAction = mixer.clipAction(greetingClip);
         greetingAction.setLoop(THREE.LoopOnce, 1);
+        greetingAction.clampWhenFinished = true; // Hold last frame instead of returning to T-pose
         greetingActionRef.current = greetingAction;
 
         console.log('Both animations loaded successfully');
@@ -221,6 +228,9 @@ export function VRMScene({ conversation, animationTrigger }: VRMSceneProps) {
         // Update volume display
         setVolume(rawViseme.intensity * 100);
 
+        // Update blinking based on audio intensity
+        const blinkValue = blinkControllerRef.current.update(smoothedViseme.intensity);
+
         // Reset all visemes first
         const allVisemes = ['aa', 'ee', 'ih', 'oh', 'ou'];
         allVisemes.forEach(v => {
@@ -233,6 +243,11 @@ export function VRMScene({ conversation, animationTrigger }: VRMSceneProps) {
             smoothedViseme.viseme,
             smoothedViseme.intensity
           );
+        }
+
+        // Apply blink expression
+        if (blinkValue > 0) {
+          vrmRef.current.expressionManager.setValue('blink', blinkValue);
         }
 
         vrmRef.current.update(deltaTime);
