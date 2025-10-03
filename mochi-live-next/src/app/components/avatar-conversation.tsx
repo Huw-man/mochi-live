@@ -1,10 +1,15 @@
 'use client';
 
 import { useConversation } from '@elevenlabs/react';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { VRMScene } from './vrm-scene';
 
 export function AvatarConversation() {
+  const [animationTrigger, setAnimationTrigger] = useState<{
+    animation: string;
+    timestamp: number;
+  } | null>(null);
+
   const conversation = useConversation({
     onConnect: () => console.log('✅ ElevenLabs Connected'),
     onDisconnect: () => console.log('❌ ElevenLabs Disconnected'),
@@ -12,6 +17,19 @@ export function AvatarConversation() {
       console.log('💬 Message:', message);
     },
     onError: (error) => console.error('🚨 Error:', error),
+    clientTools: {
+      playAnimation: (parameters: { animation: string }) => {
+        console.log('🎭 Client tool called: playAnimation', parameters);
+
+        // Trigger animation by updating state
+        setAnimationTrigger({
+          animation: parameters.animation,
+          timestamp: Date.now(),
+        });
+
+        return `Animation "${parameters.animation}" triggered successfully`;
+      },
+    },
   });
 
   // Debug: Log conversation state changes
@@ -51,7 +69,7 @@ export function AvatarConversation() {
   return (
     <>
       {/* VRM Avatar Scene */}
-      <VRMScene conversation={conversation} />
+      <VRMScene conversation={conversation} animationTrigger={animationTrigger} />
 
       {/* Conversation Controls */}
       <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-20">

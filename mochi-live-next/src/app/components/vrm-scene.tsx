@@ -13,9 +13,13 @@ interface VRMSceneProps {
     isSpeaking: boolean;
     getOutputByteFrequencyData: () => Uint8Array | undefined;
   };
+  animationTrigger?: {
+    animation: string;
+    timestamp: number;
+  } | null;
 }
 
-export function VRMScene({ conversation }: VRMSceneProps) {
+export function VRMScene({ conversation, animationTrigger }: VRMSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const vrmRef = useRef<VRM | null>(null);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
@@ -23,6 +27,7 @@ export function VRMScene({ conversation }: VRMSceneProps) {
   const greetingActionRef = useRef<THREE.AnimationAction | null>(null);
   const clockRef = useRef<THREE.Clock>(new THREE.Clock());
   const visemeSmootherRef = useRef<VisemeSmoother>(new VisemeSmoother());
+  const playAnimationRef = useRef<((type: 'idle' | 'greeting', crossfadeDuration?: number) => void) | null>(null);
   const [volume, setVolume] = useState(0);
 
   useEffect(() => {
@@ -124,9 +129,9 @@ export function VRMScene({ conversation }: VRMSceneProps) {
       }
     );
 
-    // Weighted random selection: 75% idle, 25% greeting
+    // Always return to idle after any animation finishes
     const selectNextAnimation = (): 'idle' | 'greeting' => {
-      return Math.random() < 0.25 ? 'greeting' : 'idle';
+      return 'idle';
     };
 
     // Play selected animation with crossfade
@@ -149,6 +154,9 @@ export function VRMScene({ conversation }: VRMSceneProps) {
       console.log(`🎬 Playing ${type} animation`);
     };
 
+    // Store playAnimation function in ref for external access
+    playAnimationRef.current = playAnimation;
+
     // Load and apply Mixamo FBX animations with proper retargeting
     const loadAnimations = async (vrm: VRM) => {
       try {
@@ -160,14 +168,14 @@ export function VRMScene({ conversation }: VRMSceneProps) {
 
         // Load idle animation
         console.log('Loading idle animation...');
-        const idleClip = await loadMixamoAnimation('/vrm/Idle.fbx', vrm);
+        const idleClip = await loadMixamoAnimation('/animations/Idle.fbx', vrm);
         const idleAction = mixer.clipAction(idleClip);
         idleAction.setLoop(THREE.LoopOnce, 1);
         idleActionRef.current = idleAction;
 
         // Load greeting animation
         console.log('Loading greeting animation...');
-        const greetingClip = await loadMixamoAnimation('/vrm/Standing Greeting.fbx', vrm);
+        const greetingClip = await loadMixamoAnimation('/animations/Standing Greeting.fbx', vrm);
         const greetingAction = mixer.clipAction(greetingClip);
         greetingAction.setLoop(THREE.LoopOnce, 1);
         greetingActionRef.current = greetingAction;
@@ -258,6 +266,28 @@ export function VRMScene({ conversation }: VRMSceneProps) {
       }
     };
   }, []); // Empty dependency array - only run once on mount
+
+  // Handle external animation triggers
+  useEffect(() => {
+    if (!animationTrigger || !playAnimationRef.current) return;
+
+    console.log('🎮 Animation trigger received:', animationTrigger);
+
+    // Map animation names to animation types
+    const animationMap: Record<string, 'idle' | 'greeting'> = {
+      'wave': 'greeting',
+      'greeting': 'greeting',
+      'idle': 'idle',
+    };
+
+    const animationType = animationMap[animationTrigger.animation.toLowerCase()];
+
+    if (animationType) {
+      playAnimationRef.current(animationType, 0.5);
+    } else {
+      console.warn(`⚠️ Unknown animation: ${animationTrigger.animation}`);
+    }
+  }, [animationTrigger]);
 
   return (
     <>
